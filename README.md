@@ -16,12 +16,13 @@ Each piece of documentation is kept on this branch:
 Check out the `sackOS-paginated` branch and run it with the `kernel` build tag:
 
 ```
-go run -tags kernel . <memory_size> <time_slice>
+go run -tags kernel . <memory_size> <time_slice> [disk_size]
 ```
 
-example of usage:
+examples of usage:
 ```
 go run -tags kernel . 2GB 128
+go run -tags kernel . 2GB 128 512MB
 ```
 
 Arguments:
@@ -30,6 +31,9 @@ Arguments:
 |---|---|---|
 | `memory_size` | yes | Total memory: plain bytes or with a suffix (`KB`, `MB`, `GB`, case-insensitive, e.g. `1GB`). Must be a multiple of 4, at least `1GB + 4KB` and at most `4GB`. |
 | `time_slice` | yes | Scheduler quantum, in **clock interrupts**. Each clock interrupt fires every `128` executed instructions. |
+| `disk_size` | no | Disk size, same format as `memory_size`. Must be a multiple of `4KB` (the block size), at least `4KB` and at most `16GB`. Defaults to the size of an existing `sackos.img`, or twice the size of the memory when there is none. |
+
+The disk is stored in `sackos.img`, in the current directory. It is created sparse on the first run and its contents persist across runs; delete the file to start with an empty disk.
 
 There are no flags: when the kernel starts, the TUI launches automatically and debug mode is always enabled.
 

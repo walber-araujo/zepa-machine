@@ -553,3 +553,29 @@ func TestSyscall(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskInstructions(t *testing.T) {
+	tests := []struct {
+		source   string
+		expected []byte
+	}{
+		// opcode 26 (0b011010), rs1 = W1, rs2 = W2
+		{"DREAD W1, W2", []byte{0b01101000, 0b00000001, 0b00010000, 0b00000000}},
+		// opcode 27 (0b011011), rs1 = W9, rs2 = W0
+		{"DWRITE W9, W0", []byte{0b01101100, 0b00001001, 0b00000000, 0b00000000}},
+		// opcode 27, rs1 = K1 (15), rs2 = W8
+		{"DWRITE K1, W8", []byte{0b01101100, 0b00001111, 0b01000000, 0b00000000}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			memory, err := RunAssemblerFromReader(bytes.NewBufferString(tt.source + "\n"))
+			if err != nil {
+				t.Fatalf("Error running the assembler: %v", err)
+			}
+			if !bytes.Equal(memory, tt.expected) {
+				t.Errorf("Expected %08b, got %08b", tt.expected, memory)
+			}
+		})
+	}
+}

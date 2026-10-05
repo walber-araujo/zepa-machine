@@ -1171,6 +1171,7 @@ var opNames = map[byte]string{
 	12: "JUMP", 13: "JMPR", 14: "BEQ", 15: "BLT", 16: "BGT",
 	17: "LOAD", 18: "STORE", 19: "LDD", 20: "STRD",
 	21: "LDB", 22: "LDSB", 23: "STRB", 24: "MRET", 25: "SYSCALL",
+	26: "DREAD", 27: "DWRITE",
 }
 
 var regNames = [23]string{
@@ -1200,7 +1201,7 @@ func decodeInstruction(inst uint32) string {
 	case 13: // JMPR
 		return fmt.Sprintf("%s %s", name, regNames[rs1])
 	// R-Type memory: value, [address register]
-	case 17, 18, 21, 22, 23: // LOAD, STORE, LDB, LDSB, STRB
+	case 17, 18, 21, 22, 23, 26, 27: // LOAD, STORE, LDB, LDSB, STRB, DREAD, DWRITE
 		return fmt.Sprintf("%s %s, %s", name, regNames[rs1], regNames[rs2])
 	// I-Type branches: relative immediate
 	case 12, 14, 15, 16: // JUMP, BEQ, BLT, BGT

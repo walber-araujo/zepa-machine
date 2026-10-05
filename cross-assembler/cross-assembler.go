@@ -67,6 +67,8 @@ const (
 	STRB_OPCODE
 	MRET_OPCODE
 	SYSCALL_OPCODE
+	DREAD_OPCODE
+	DWRITE_OPCODE
 )
 
 // Map register names to Register values
@@ -122,6 +124,8 @@ var opcodeMap = map[string]Opcode{
 	"STRB":    STRB_OPCODE,
 	"MRET":    MRET_OPCODE,
 	"SYSCALL": SYSCALL_OPCODE,
+	"DREAD":   DREAD_OPCODE,
+	"DWRITE":  DWRITE_OPCODE,
 }
 
 // Define instruction format and function codes for each type
@@ -170,6 +174,8 @@ var instructionSpecs = map[Opcode]InstructionSpec{
 	STRB_OPCODE:    newInstructionSpec("R-Type", STRB_OPCODE),
 	MRET_OPCODE:    newInstructionSpec("I-Type", MRET_OPCODE),
 	SYSCALL_OPCODE: newInstructionSpec("I-Type", SYSCALL_OPCODE),
+	DREAD_OPCODE:   newInstructionSpec("R-Type", DREAD_OPCODE),
+	DWRITE_OPCODE:  newInstructionSpec("R-Type", DWRITE_OPCODE),
 }
 
 // Common fields used across all instruction types

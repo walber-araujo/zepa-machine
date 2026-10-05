@@ -64,6 +64,8 @@ const (
 	STRB
 	MRET
 	SYSCALL
+	DREAD
+	DWRITE
 	FETCH
 )
 
@@ -102,6 +104,11 @@ const (
 const TIMER_INTERVAL = 128
 
 const (
+	diskBlockSize    = 4096 // one disk block fits exactly in one page frame
+	diskAccessCycles = 100
+)
+
+const (
 	pageSize        = 4096       // 4KB pages (12 bits of offset)
 	kernelBoundary  = 0xC0000000 // 3GB mark
 	isPteMappedMask = 0x00100000 // V flag is bit 20 of the PTE
@@ -134,6 +141,8 @@ var operations = map[Opcode]Operation{
 	STRB:    (*Machine).strb,
 	MRET:    (*Machine).mret,
 	SYSCALL: (*Machine).syscall,
+	DREAD:   (*Machine).dread,
+	DWRITE:  (*Machine).dwrite,
 }
 
 type Instruction struct {
@@ -148,6 +157,8 @@ type Instruction struct {
 
 type Machine struct {
 	memory               []byte
+	disk                 []byte
+	diskMapped           bool
 	registers            map[Register]uint32
 	mu                   sync.RWMutex
 	killFlag             bool
@@ -390,6 +401,57 @@ func (m *Machine) syscall(inst Instruction) int {
 	return 4
 }
 
+// diskTransfer validates a DREAD/DWRITE and returns the disk and memory
+// slices of the block transfer. The buffer must be page-aligned, so the
+// whole block lives in a single frame and is translated only once.
+func (m *Machine) diskTransfer(inst Instruction) (diskBlock, frame []byte, ok bool) {
+	block := m.registers[inst.rs1]
+	addr := m.registers[inst.rs2]
+
+	if block >= uint32(len(m.disk)/diskBlockSize) {
+		m.exception(faultExc)
+		return nil, nil, false
+	}
+
+	if addr%diskBlockSize != 0 {
+		m.registers[efa] = addr
+		m.exception(faultExc)
+		return nil, nil, false
+	}
+
+	physicalAddr, ok := m.translate(addr, 1)
+	if !ok {
+		return nil, nil, false
+	}
+
+	if uint64(physicalAddr)+diskBlockSize > uint64(len(m.memory)) {
+		m.registers[efa] = addr
+		m.exception(faultExc)
+		return nil, nil, false
+	}
+
+	diskAddr := uint64(block) * diskBlockSize
+	return m.disk[diskAddr : diskAddr+diskBlockSize], m.memory[physicalAddr : physicalAddr+diskBlockSize], true
+}
+
+// DREAD rs1, rs2: disk block rs1 -> memory[rs2 .. rs2+4095]
+func (m *Machine) dread(inst Instruction) int {
+	diskBlock, frame, ok := m.diskTransfer(inst)
+	if ok {
+		copy(frame, diskBlock)
+	}
+	return diskAccessCycles
+}
+
+// DWRITE rs1, rs2: memory[rs2 .. rs2+4095] -> disk block rs1
+func (m *Machine) dwrite(inst Instruction) int {
+	diskBlock, frame, ok := m.diskTransfer(inst)
+	if ok {
+		copy(diskBlock, frame)
+	}
+	return diskAccessCycles
+}
+
 func (m *Machine) lookupPhysical(addr uint32, byteCount uint32) (uint32, bool) {
 	if !m.isMmuEnabled() {
 		return addr, true
@@ -472,7 +534,7 @@ func (m *Machine) checkIllegalRegisterAccess(inst Instruction) bool {
 }
 
 func (m *Machine) checkIllegalInstruction(inst Instruction) bool {
-	priviligedInstructions := []Opcode{MRET}
+	priviligedInstructions := []Opcode{MRET, DREAD, DWRITE}
 	return !m.isKernelMode() && slices.Contains(priviligedInstructions, inst.opcode)
 }
 
@@ -555,7 +617,7 @@ func (m *Machine) decode() (Instruction, bool) {
 	opcode := m.getOpcode(instruction)
 
 	switch opcode {
-	case AND, OR, XOR, ADD, SUB, MUL, UDIV, SDIV, CMP, JMPR, LOAD, STORE, LDB, LDSB, STRB, SHL, SHA:
+	case AND, OR, XOR, ADD, SUB, MUL, UDIV, SDIV, CMP, JMPR, LOAD, STORE, LDB, LDSB, STRB, SHL, SHA, DREAD, DWRITE:
 		return m.decodeRTypeInst(instruction), true
 	case MV, JUMP, BEQ, BLT, BGT, LDD, STRD, SYSCALL, MRET:
 		return m.decodeITypeInst(instruction), true
@@ -639,6 +701,10 @@ func (m *Machine) GetMemory() []byte {
 	return m.memory
 }
 
+func (m *Machine) GetDisk() []byte {
+	return m.disk
+}
+
 func (m *Machine) ReadWord(addr uint32) uint32 {
 	var word uint32
 	for i := uint32(0); i < 4; i++ {
@@ -690,9 +756,19 @@ func (m *Machine) GetCyclesExecuted() uint64 {
 	return m.totalCycles
 }
 
+// DefaultDiskSize is twice the memory, rounded down to a whole number of blocks.
+func DefaultDiskSize(memoryBytes int) int {
+	return 2 * memoryBytes / diskBlockSize * diskBlockSize
+}
+
 func NewMachine(memoryBytes int, debugFlag bool) *Machine {
+	return NewMachineWithDisk(memoryBytes, DefaultDiskSize(memoryBytes), debugFlag)
+}
+
+func NewMachineWithDisk(memoryBytes, diskBytes int, debugFlag bool) *Machine {
 	machine := &Machine{
 		memory:    make([]byte, memoryBytes),
+		disk:      make([]byte, diskBytes),
 		registers: make(map[Register]uint32),
 		debugFlag: debugFlag,
 		StepChan:  make(chan struct{}),

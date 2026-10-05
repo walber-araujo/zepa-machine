@@ -15,11 +15,14 @@ import (
 
 const (
 	kernelMappingOffset = 0xC0000000 // kernel mapeado 3GB acima
+	diskBlockSize       = 4096
+	maxDiskSize         = 1 << 34
+	diskFile            = "sackos.img"
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: go run -tags kernel . <memory_size> <time_slice>")
+	if len(os.Args) < 3 || len(os.Args) > 4 {
+		fmt.Println("Usage: go run -tags kernel . <memory_size> <time_slice> [disk_size]")
 		return
 	}
 
@@ -50,7 +53,14 @@ func main() {
 		log.Fatalf("Conversion failed: %v", err)
 	}
 
-	machine := machine.NewMachine(memorySize, true)
+	diskArg := ""
+	if len(os.Args) == 4 {
+		diskArg = os.Args[3]
+	}
+	machine, err := newMachine(memorySize, diskArg, diskFile)
+	if err != nil {
+		log.Fatal(err)
+	}
 	machine.LoadProgram(binaryCode)
 
 	memSlice := machine.GetMemory()[0x2000:0x2004]
@@ -64,6 +74,43 @@ func main() {
 
 	go machine.Boot()
 	runTUIWithMachine(machine)
+	if err := machine.SyncDisk(); err != nil {
+		log.Printf("could not sync %s: %v", diskFile, err)
+	}
+}
+
+// newMachine backs the disk with the file at path. Without diskArg, the disk
+// keeps the size of an existing file, or is twice as big as the memory.
+func newMachine(memorySize int, diskArg, path string) (*machine.Machine, error) {
+	diskSize := machine.DefaultDiskSize(memorySize)
+	if diskArg != "" {
+		var err error
+		if diskSize, err = parseDiskSize(diskArg); err != nil {
+			return nil, err
+		}
+	} else if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+		diskSize = int(info.Size())
+	}
+
+	m := machine.NewMachineWithDisk(memorySize, 0, true)
+	if err := m.AttachDiskFile(path, diskSize); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func parseDiskSize(sizeStr string) (int, error) {
+	diskSize, err := parseMemorySize(sizeStr)
+	if err != nil {
+		return 0, err
+	}
+	if diskSize < diskBlockSize || diskSize%diskBlockSize != 0 {
+		return 0, fmt.Errorf("disk_size must be a multiple of 4KB and at least 4KB, got %dB", diskSize)
+	}
+	if diskSize > maxDiskSize {
+		return 0, fmt.Errorf("disk_size must be at most 16GB, got %dB", diskSize)
+	}
+	return diskSize, nil
 }
 
 func parseMemorySize(sizeStr string) (int, error) {
@@ -86,7 +133,7 @@ func parseMemorySize(sizeStr string) (int, error) {
 
 	val, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		return 0, fmt.Errorf("invalid memory format: %s", sizeStr)
+		return 0, fmt.Errorf("invalid size format: %s", sizeStr)
 	}
 
 	return val * multiplier, nil
